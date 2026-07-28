@@ -1,3 +1,0 @@
-# squashgame
-squash game
-Test
