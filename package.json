@@ -1,0 +1,17 @@
+{
+  "name": "squash-strike-server",
+  "version": "1.0.0",
+  "description": "Squash Strike multiplayer relay server (Socket.IO)",
+  "main": "squash_strike_server.js",
+  "scripts": {
+    "start": "node squash_strike_server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  }
+}
