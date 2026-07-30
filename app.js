@@ -32,12 +32,13 @@ import {
   setDifficulty, getDifficultyLabel,
   getPlayerStamina, getIsWinded, getDiveRecoveryTimer,
   getIsCharging, getChargeRatio, canRequestLet,
-  resetForServe,
+  resetForServe, resetBotMemory, setSoloRallyMode,
   EYE_HEIGHT, LOOK_SPEED
 } from './player.js';
 
 import { revealScreen, concealScreen } from './transitions.js';
 import { getProfile, saveProfile } from './shop.js';
+import { checkAchievements } from './stats.js';
 import { getSocket, disconnectSocket } from './netplay.js';
 
 /* ---------------------------------------------------------
@@ -207,6 +208,19 @@ let isHost = false;
 let netTransformTimer = 0;
 const NET_TRANSFORM_INTERVAL = 1 / 15;
 
+/* ---------------------------------------------------------
+   PRACTICE MODE
+   null in every real match (singleplayer or online) — every branch
+   below is an `if (practiceMode)` check so normal matches are
+   unaffected. 'serve' repeats serves with no return expected;
+   'wallrally' is a solo rally with no bot opponent at all. Both
+   skip scoring/match-format entirely and just track an attempt's
+   rally length against a session-best.
+--------------------------------------------------------- */
+let practiceMode = null; // null | 'serve' | 'wallrally'
+let practiceBest = { serve: 0, wallrally: 0 };
+let practiceStreak = 0;
+
 function flipSide(side) { return side === 'player' ? 'bot' : side === 'bot' ? 'player' : side; }
 function flipSides(obj) { return { player: obj.bot, bot: obj.player }; }
 
@@ -229,6 +243,12 @@ function onOpponentTransform({ position, rotation }) {
 
 function onOpponentBallHit({ pos, vel, shotType, chargeRatio, isServe }) {
   if (matchOver) return;
+  // A late/reordered packet for a shot that landed just before the rally
+  // ended (e.g. the return that caused the double-bounce fault) can arrive
+  // after the host already called endRally() and set status 'dead'. Without
+  // this guard it would resurrect the dead ball mid-flight and let it fault
+  // again (e.g. into the tin), double-scoring the same rally.
+  if (!isServe && ballState.status === 'dead') return;
   if (pos) ballState.pos.set(pos.x, pos.y, pos.z);
   if (vel) ballState.vel.set(vel.x, vel.y, vel.z);
   ballState.lastHitBy = 'bot';
@@ -306,6 +326,9 @@ function onOpponentLeftMidMatch() {
 
 export function startOnlineMatch(role) {
   onlineMode = true;
+  practiceMode = null;
+  setSoloRallyMode(false);
+  bot.visible = true;
   isHost = role !== 'player2';
   if (pauseBtnEl) pauseBtnEl.textContent = 'HOLD: RESIGN';
   const socket = getSocket();
@@ -334,7 +357,9 @@ function startServe(server) {
 
   // Online: the "bot" slot is the real remote opponent — their serve
   // arrives as a genuine opponentBallHit event, not a local AI decision.
-  if (server === 'bot' && !onlineMode) {
+  // Practice modes never hand the serve to 'bot' (handlePracticeRallyEnd
+  // always re-serves as 'player'), but guard defensively anyway.
+  if (server === 'bot' && !onlineMode && !practiceMode) {
     setTimeout(() => {
       whenResumed(() => {
         if (ballState.status === 'serving' && !matchOver && ballState.server === 'bot') {
@@ -345,7 +370,44 @@ function startServe(server) {
   }
 }
 
+/**
+ * Practice-mode counterpart to endRally() — no score/games/match-format,
+ * just tracks this attempt's rally length against a session-best and
+ * re-serves as 'player' every time.
+ */
+function handlePracticeRallyEnd(winner, reason) {
+  if (ballState.status === 'dead') return;
+  ballState.status = 'dead';
+
+  const length = matchStats.currentRallyLength;
+  matchStats.currentRallyLength = 0;
+  let banner;
+
+  if (practiceMode === 'serve') {
+    const isFault = /FAULT|OUT/.test(reason || '');
+    if (isFault) {
+      practiceStreak = 0;
+      banner = `<span style="color:var(--red)">FAULT</span><br><span style="font-size:10px;opacity:0.75">${reason}</span>`;
+    } else {
+      practiceStreak++;
+      if (practiceStreak > practiceBest.serve) practiceBest.serve = practiceStreak;
+      banner = `<span style="color:var(--lime)">GOOD SERVE!</span><br><span style="font-size:10px;opacity:0.8">Streak: ${practiceStreak} · Best: ${practiceBest.serve}</span>`;
+    }
+  } else {
+    if (length > practiceBest.wallrally) {
+      practiceBest.wallrally = length;
+      banner = `<span style="color:var(--lime)">NEW BEST!</span><br><span style="font-size:10px;opacity:0.8">Rally: ${length}</span>`;
+    } else {
+      banner = `<span style="font-size:14px;">Rally: ${length}</span><br><span style="font-size:10px;opacity:0.7">Best: ${practiceBest.wallrally}</span>`;
+    }
+  }
+
+  showBanner(banner, 1400);
+  setTimeout(() => whenResumed(() => startServe('player')), 1400);
+}
+
 function endRally(winner, reason) {
+  if (practiceMode) return handlePracticeRallyEnd(winner, reason);
   // Online: only the host decides rally outcomes — the joiner's own
   // fault-detection is a no-op and instead mirrors whatever the host
   // broadcasts via applyRemoteRally(), so the two sides can't disagree.
@@ -835,6 +897,7 @@ function beginMatch(firstServer) {
   matchStats.rallies = 0; matchStats.maxSpeed = 0; matchStats.playerHits = 0; matchStats.totalBounces = 0;
   matchStats.longestRally = 0; matchStats.winners = 0; matchStats.errors = 0; matchStats.currentRallyLength = 0;
 
+  document.getElementById('scoreboard')?.classList.toggle('practice-mode', !!practiceMode);
   updateScoreboardUI();
   hideView(gameOverScreen);
   clock.getDelta();
@@ -845,6 +908,28 @@ function beginMatch(firstServer) {
 
 export function startMatch() {
   onlineMode = false;
+  practiceMode = null;
+  setSoloRallyMode(false);
+  bot.visible = true;
+  resetBotMemory();
+  if (pauseBtnEl) pauseBtnEl.textContent = 'PAUSE';
+  beginMatch('player');
+}
+
+/**
+ * Practice modes reuse the real match setup (beginMatch) but skip scoring
+ * entirely (see handlePracticeRallyEnd) — 'serve' repeats serves with no
+ * return expected; 'wallrally' is a solo rally with no bot opponent, so
+ * the bot avatar is hidden and attemptHit's same-actor guard is relaxed
+ * (see setSoloRallyMode) so the player can keep hitting their own return.
+ */
+export function startPracticeMatch(mode) {
+  onlineMode = false;
+  practiceMode = mode;
+  practiceStreak = 0;
+  setSoloRallyMode(mode === 'wallrally');
+  bot.visible = mode !== 'wallrally';
+  resetBotMemory();
   if (pauseBtnEl) pauseBtnEl.textContent = 'PAUSE';
   beginMatch('player');
 }
@@ -868,6 +953,13 @@ function returnToMainMenu() {
     disconnectSocket();
   }
 
+  if (practiceMode) {
+    practiceMode = null;
+    setSoloRallyMode(false);
+    bot.visible = true;
+    document.getElementById('scoreboard')?.classList.remove('practice-mode');
+  }
+
   if (wasOnline) onReturnToMenuOnline?.();
   else onReturnToMenu?.();
 }
@@ -883,8 +975,13 @@ function awardMatchRewards(isWin) {
   profile.stats.totalWinners += matchStats.winners;
   profile.stats.totalErrors += matchStats.errors;
   if (matchStats.maxSpeed > profile.stats.maxSpeedAllTime) profile.stats.maxSpeedAllTime = matchStats.maxSpeed;
+  if (matchStats.longestRally > profile.stats.longestRallyAllTime) profile.stats.longestRallyAllTime = matchStats.longestRally;
 
+  const newlyUnlocked = checkAchievements(matchStats, isWin, profile);
   saveProfile();
+  newlyUnlocked.forEach((ach, i) => {
+    setTimeout(() => showBanner(`<span style="color:var(--lime)">ACHIEVEMENT UNLOCKED</span><br><span style="font-size:10px;opacity:0.85">${ach.icon} ${ach.name}</span>`, 2400), i * 600);
+  });
   return coinsEarned;
 }
 
@@ -1005,8 +1102,11 @@ function animate() {
     if (playerResult.bonked) { screenShake(0.08, 0.15); playSound('wall'); }
 
     // Online: the opponent's avatar is driven by network events (see
-    // onOpponentTransform/onOpponentBallHit), not local bot AI.
-    if (!onlineMode) handleHitResult(updateBot(worldDt));
+    // onOpponentTransform/onOpponentBallHit), not local bot AI. Solo
+    // wall-rally practice has no opponent at all, so skip it there too
+    // ('serve' practice still has a visible-but-inert bot, harmless to
+    // update since the ball never reaches it).
+    if (!onlineMode && practiceMode !== 'wallrally') handleHitResult(updateBot(worldDt));
     resolvePlayerCollisions(worldDt);
 
     const events = updatePhysics(worldDt);

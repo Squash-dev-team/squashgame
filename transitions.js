@@ -23,6 +23,10 @@ export function concealScreen(el, onDone) {
   if (!el) return;
   el.classList.add('xfade', 'xfade-hide');
   window.setTimeout(() => {
+    // If revealScreen() re-showed this element in the meantime (it clears
+    // xfade-hide), this timeout is stale — don't clobber the reveal by
+    // hiding it out from under the caller.
+    if (!el.classList.contains('xfade-hide')) return;
     el.classList.add('hidden');
     onDone?.();
   }, TRANSITION_MS);

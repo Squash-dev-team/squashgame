@@ -17,6 +17,7 @@
 
 import { connectSocket, disconnectSocket } from './netplay.js';
 import { getProfile } from './shop.js';
+import { revealScreen, concealScreen } from './transitions.js';
 
 let scene, camera, renderer;
 let rafId = null;
@@ -108,15 +109,19 @@ export function initMultiplayer(callbacks = {}) {
   scene.add(ball);
 
   /* ---------------- MENU / PANEL SWITCHING ----------------
-     Mirrors home.js exactly: hovering a nav button swaps which
-     preview panel is shown (title + floating icon + one-line
-     definition) so you can browse all three without committing to
-     one; clicking additionally reveals that panel's actual
-     buttons/inputs a beat later, so "the function" only shows up
-     once you've read what it does. ---------------------------- */
+     Mirrors home.js's hover-preview (title + floating icon + one-line
+     definition swap on mouseenter, so you can browse all three
+     without committing to one). Clicking, though, matches how UI2's
+     Settings/How-to-Play nav buttons work: it opens that flow's
+     controls as its own full popup (menu-overlay) over the lobby,
+     instead of unfolding them inline in the preview pane. ---------- */
   const menuButtonsArray = document.querySelectorAll('.mp-menu-btn');
   const previewPanelsArray = document.querySelectorAll('.mp-preview-content');
-  let controlsRevealTimer = null;
+  const mpOverlaysByTarget = {
+    'mp-preview-create': document.getElementById('mpCreateView'),
+    'mp-preview-enter': document.getElementById('mpEnterView'),
+    'mp-preview-free': document.getElementById('mpFreeView')
+  };
 
   function activatePanel(btn) {
     menuButtonsArray.forEach(b => b.classList.remove('active'));
@@ -131,16 +136,25 @@ export function initMultiplayer(callbacks = {}) {
   menuButtonsArray.forEach(btn => {
     btn.addEventListener('mouseenter', () => activatePanel(btn));
     btn.addEventListener('click', () => {
-      const panel = activatePanel(btn);
-      clearTimeout(controlsRevealTimer);
-      const controls = panel?.querySelector('.mp-controls');
-      if (controls) {
-        controls.classList.remove('mp-reveal');
-        void controls.offsetWidth;
-        controlsRevealTimer = setTimeout(() => controls.classList.add('mp-reveal'), 550);
-      }
+      activatePanel(btn);
+      const overlay = mpOverlaysByTarget[btn.getAttribute('data-target')];
+      Object.values(mpOverlaysByTarget).forEach(o => { if (o !== overlay) concealScreen(o); });
+      if (overlay) revealScreen(overlay);
     });
   });
+
+  // Leaving any of the three popups just backs out to the lobby nav —
+  // resetLobby() (called by main.js each time it (re)shows the lobby)
+  // is what actually clears idle/waiting state, so mirror that here too
+  // in case the player backs out mid-flow instead of leaving the screen.
+  function closeMpOverlay(overlay) {
+    disconnectSocket();
+    resetLobby();
+    concealScreen(overlay);
+  }
+  document.getElementById('closeMpCreateBtn')?.addEventListener('click', () => closeMpOverlay(mpOverlaysByTarget['mp-preview-create']));
+  document.getElementById('closeMpEnterBtn')?.addEventListener('click', () => closeMpOverlay(mpOverlaysByTarget['mp-preview-enter']));
+  document.getElementById('closeMpFreeBtn')?.addEventListener('click', () => closeMpOverlay(mpOverlaysByTarget['mp-preview-free']));
 
   const backBtn = document.getElementById('mpBackBtn');
   if (backBtn) backBtn.addEventListener('click', () => onBack?.());
@@ -210,6 +224,10 @@ export function initMultiplayer(callbacks = {}) {
     socket.on('matchStart', () => {
       const role = myRole === 'player2' ? 'player2' : 'player1';
       pendingAction = null;
+      // Whichever of the three popups was open (Create/Enter/Free Play all
+      // reach this), it's a sibling of #multiplayerScreen rather than a
+      // child, so main.js hiding the lobby screen wouldn't hide it too.
+      Object.values(mpOverlaysByTarget).forEach(overlay => concealScreen(overlay));
       onMatchStart?.(role);
     });
 
@@ -292,11 +310,6 @@ export function initMultiplayer(callbacks = {}) {
     renderer.render(scene, camera);
   }
 
-  // The first panel starts active without a click ever firing — reveal
-  // its controls the same way, just once, on load.
-  const initialControls = document.querySelector('.mp-preview-content.active .mp-controls');
-  if (initialControls) setTimeout(() => initialControls.classList.add('mp-reveal'), 550);
-
   _animateRef = animate;
   initialized = true;
 }
@@ -329,4 +342,8 @@ export function resetLobby() {
   document.getElementById('mpFindCancelBtn')?.classList.add('hidden');
   const findStatus = document.getElementById('mpFindStatus');
   if (findStatus) findStatus.textContent = '';
+
+  concealScreen(document.getElementById('mpCreateView'));
+  concealScreen(document.getElementById('mpEnterView'));
+  concealScreen(document.getElementById('mpFreeView'));
 }

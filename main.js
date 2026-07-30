@@ -14,7 +14,8 @@ import { initMultiplayer, pauseMultiplayer, resumeMultiplayer, resetLobby } from
 import { initShop, openShop } from './shop.js';
 import { initAccount, openAccountOverlay } from './account.js';
 import { initTutorial, openTutorial } from './tutorial.js';
-import { startMatch, startOnlineMatch, setReturnToMenuHandler, setOnlineReturnToMenuHandler } from './app.js';
+import { initStats, openStatsOverlay } from './stats.js';
+import { startMatch, startOnlineMatch, startPracticeMatch, setReturnToMenuHandler, setOnlineReturnToMenuHandler } from './app.js';
 import { revealScreen, concealScreen } from './transitions.js';
 
 function show(id) { revealScreen(document.getElementById(id)); }
@@ -51,6 +52,7 @@ function showMultiplayerScreen() {
 initShop();
 initAccount();
 initTutorial();
+initStats();
 
 initMultiplayer({
   onBack: showIntroScreen,
@@ -69,7 +71,8 @@ initHome({
   },
   onSettings: () => show('settingsView'),
   onControls: () => show('controlsView'),
-  onStats: () => { /* no dedicated career-stats screen yet */ },
+  onStats: openStatsOverlay,
+  onPractice: () => show('practiceOverlay'),
   onBack: showIntroScreen
 });
 
@@ -83,6 +86,16 @@ initIntro({
 document.getElementById('closeSettingsBtn')?.addEventListener('click', () => hide('settingsView'));
 document.getElementById('closeControlsBtn')?.addEventListener('click', () => hide('controlsView'));
 document.getElementById('openTutorialBtn')?.addEventListener('click', openTutorial);
+document.getElementById('closePracticeBtn')?.addEventListener('click', () => hide('practiceOverlay'));
+
+function enterPractice(mode) {
+  hide('practiceOverlay');
+  hide('homeScreen');
+  pauseHome();
+  startPracticeMatch(mode);
+}
+document.getElementById('practiceServeBtn')?.addEventListener('click', () => enterPractice('serve'));
+document.getElementById('practiceWallRallyBtn')?.addEventListener('click', () => enterPractice('wallrally'));
 
 // When a match ends (quit or restart), return to the home menu rather
 // than a dead end — app.js doesn't know about home.js, it just calls this.

@@ -69,14 +69,74 @@ export const PITCH_MAX = 0.52;
    BOT DIFFICULTY TABLE
 --------------------------------------------------------- */
 export const DIFF = {
-  easy:   { reach: 1.60, speed: 2.2, reactDelay: 0.50, aimErr: 1.25, faultChance: 0.15, label: 'Bot·Easy' },
-  medium: { reach: 1.80, speed: 3.2, reactDelay: 0.26, aimErr: 0.60, faultChance: 0.06, label: 'Bot·Med' },
-  hard:   { reach: 1.90, speed: 4.5, reactDelay: 0.10, aimErr: 0.18, faultChance: 0.01, label: 'Bot·Hard' }
+  easy:   { reach: 1.60, speed: 2.2, reactDelay: 0.50, aimErr: 1.25, faultChance: 0.15, label: 'Bot·Easy',
+            killBias: 0.05, tacticalChance: 0.35, serveMix: { drive: 0.7, lob: 0.3, drop: 0.0 } },
+  medium: { reach: 1.80, speed: 3.2, reactDelay: 0.26, aimErr: 0.60, faultChance: 0.06, label: 'Bot·Med',
+            killBias: 0.20, tacticalChance: 0.70, serveMix: { drive: 0.45, lob: 0.4, drop: 0.15 } },
+  hard:   { reach: 1.90, speed: 4.5, reactDelay: 0.10, aimErr: 0.18, faultChance: 0.01, label: 'Bot·Hard',
+            killBias: 0.45, tacticalChance: 1.0, serveMix: { drive: 0.35, lob: 0.25, drop: 0.4 } }
 };
 let DIFFICULTY = 'medium';
 export function setDifficulty(level) { if (DIFF[level]) DIFFICULTY = level; }
 export function getDifficulty() { return DIFFICULTY; }
 export function getDifficultyLabel() { return DIFF[DIFFICULTY].label; }
+
+/* ---------------------------------------------------------
+   BOT MEMORY (pattern-reading)
+   Session-only (never persisted) rolling record of the player's
+   recent shots, so the bot can start covering a favored side/shot
+   instead of playing every rally identically. Reset once per
+   match via resetBotMemory() (app.js's startMatch(), singleplayer
+   only — online matches never touch this since the "bot" avatar
+   there is a real remote opponent, not this AI).
+--------------------------------------------------------- */
+const BOT_MEMORY_LEN = 8;
+let botMemory = { shots: [], sides: [] };
+
+// Solo wall-rally practice (app.js's startPracticeMatch('wallrally')) has
+// no opponent to return the ball, so the player must be allowed to hit it
+// again themselves once it comes back off the front wall — normally
+// blocked by the same-actor guard below (correct for real 2-player play).
+let soloRallyMode = false;
+export function setSoloRallyMode(v) { soloRallyMode = v; }
+
+export function resetBotMemory() { botMemory = { shots: [], sides: [] }; }
+
+function recordPlayerShot(shotType, tx) {
+  botMemory.shots.push(shotType);
+  if (botMemory.shots.length > BOT_MEMORY_LEN) botMemory.shots.shift();
+  botMemory.sides.push(tx >= 0 ? 1 : -1);
+  if (botMemory.sides.length > BOT_MEMORY_LEN) botMemory.sides.shift();
+}
+
+// Returns the shot type the player has favored recently if it's a strong
+// enough majority to act on, else null.
+function favoredPlayerShot() {
+  if (botMemory.shots.length < 4) return null;
+  const counts = {};
+  botMemory.shots.forEach(s => { counts[s] = (counts[s] || 0) + 1; });
+  const [topShot, topCount] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+  return topCount / botMemory.shots.length >= 0.6 ? topShot : null;
+}
+
+// Returns -1/1 if the player has favored one side recently, else 0.
+function favoredPlayerSide() {
+  if (botMemory.sides.length < 4) return 0;
+  const sum = botMemory.sides.reduce((a, b) => a + b, 0);
+  const bias = sum / botMemory.sides.length;
+  return Math.abs(bias) >= 0.5 ? Math.sign(bias) : 0;
+}
+
+function weightedPick(mix) {
+  const entries = Object.entries(mix);
+  const total = entries.reduce((sum, [, w]) => sum + w, 0);
+  let roll = Math.random() * total;
+  for (const [key, w] of entries) {
+    roll -= w;
+    if (roll <= 0) return key;
+  }
+  return entries[entries.length - 1][0];
+}
 
 /* ---------------------------------------------------------
    INPUT STATE
@@ -434,10 +494,13 @@ export function attemptHit(who, forcedShotOverride, chargeRatio = 0) {
       const finalAim = getAim3D(virtualTx, virtualTy);
       hitBallTo(finalAim.x, finalAim.y, finalAim.z, hitSpeed);
     } else {
-      const tx = ballState.serveSide === 'left' ? 1.2 : -1.2;
-      const ty = Math.max(FRONT_H - 1.5, SERVICE_LINE_H + 1.2 + Math.random());
-      currentExecutedShot = 'lob';
-      hitBallTo(tx, ty, 0, 12.5);
+      const serveTx = ballState.serveSide === 'left' ? 1.2 : -1.2;
+      currentExecutedShot = weightedPick(diff.serveMix);
+      let serveTy, serveSpeed;
+      if (currentExecutedShot === 'lob') { serveTy = Math.max(FRONT_H - 1.5, SERVICE_LINE_H + 1.2 + Math.random()); serveSpeed = 12.5; }
+      else if (currentExecutedShot === 'drop') { serveTy = SERVICE_LINE_H + 0.15 + Math.random() * 0.2; serveSpeed = 9.5 + Math.random(); }
+      else { serveTy = SERVICE_LINE_H + 0.6 + Math.random() * 0.6; serveSpeed = 14.5; }
+      hitBallTo(serveTx, serveTy, 0, serveSpeed);
     }
 
     ballState.status = 'inplay';
@@ -450,7 +513,7 @@ export function attemptHit(who, forcedShotOverride, chargeRatio = 0) {
     return { hit: true, who, shotType: currentExecutedShot, isFluke: false, chargeRatio, powerShot: false, isServe: true };
   }
 
-  if (ballState.lastHitBy === who) return null;
+  if (ballState.lastHitBy === who && !soloRallyMode) return null;
   if (!ballState.hitFrontWall) return null;
 
   const dx = ballState.pos.x - actor.position.x;
@@ -502,21 +565,32 @@ export function attemptHit(who, forcedShotOverride, chargeRatio = 0) {
 
     const finalAim = getAim3D(tx, ty);
     hitBallTo(finalAim.x, finalAim.y, finalAim.z, speed);
+    recordPlayerShot(currentExecutedShot, tx);
   } else {
     const playerDeep = player.position.z > LEN - 2.6;
     const playerShort = player.position.z < 3.46; // shortLineZ - 0.8
     const botUpFront = ballState.pos.z < 4.2;
-    const tacticalChance = { easy: 0.35, medium: 0.7, hard: 1.0 }[DIFFICULTY];
-    const readsPlayer = Math.random() < tacticalChance;
+    const readsPlayer = Math.random() < diff.tacticalChance;
+    const favoredShot = readsPlayer ? favoredPlayerShot() : null;
 
     if (readsPlayer && playerDeep && botUpFront) currentExecutedShot = 'drop';
     else if (readsPlayer && playerShort) currentExecutedShot = 'lob';
-    else if (botUpFront && ballState.pos.y < 1.2 && Math.random() < 0.2 + diff.speed * 0.03) currentExecutedShot = 'kill';
+    // Player's been leaning on kill shots — deny the setup by keeping the
+    // ball deep/safe instead of feeding another short one back.
+    else if (readsPlayer && favoredShot === 'kill' && !botUpFront) currentExecutedShot = 'lob';
+    else if (botUpFront && ballState.pos.y < 1.2 && Math.random() < diff.killBias + pressure * 0.25) currentExecutedShot = 'kill';
     else currentExecutedShot = 'drive';
 
     const playerThreat = player.position.x > 0 ? -1 : 1;
     const targetXOffset = HALF_W - (0.3 + pressure * 0.6);
     tx = playerThreat * targetXOffset;
+    // Player's been favoring one side — bias the placement further into
+    // the OTHER side to actually punish the tendency instead of just
+    // predicting where they currently stand.
+    if (readsPlayer) {
+      const sideBias = favoredPlayerSide();
+      if (sideBias !== 0) tx -= sideBias * 0.6;
+    }
 
     if (currentExecutedShot === 'drop') { ty = TIN_H + 0.16; speed = 10.0 + diff.speed * 0.2 + Math.random() * 1.2; }
     else if (currentExecutedShot === 'lob') { ty = FRONT_H - 0.95; speed = 11.8 + diff.speed * 0.2 + Math.random() * 1.4; }
@@ -774,7 +848,14 @@ export function updateBot(dt) {
       if (t > 0 && t < 1.4) { targetX = ballState.pos.x + ballState.vel.x * t; targetZ = ballState.pos.z + ballState.vel.z * t; }
     }
   }
-  if (ballState.lastHitBy === 'bot') { targetX = 0; targetZ = 5.06; /* shortLineZ + 0.8 */ }
+  if (ballState.lastHitBy === 'bot') {
+    // Recovering to the T between exchanges — lean toward whichever side
+    // the player has favored returning to recently instead of always
+    // centering blind, so a well-covered bot actually looks anticipatory.
+    const sideBias = favoredPlayerSide();
+    targetX = sideBias * 0.5 * diff.tacticalChance;
+    targetZ = 5.06; /* shortLineZ + 0.8 */
+  }
   targetX = THREE.MathUtils.clamp(targetX, -HALF_W + 0.35, HALF_W - 0.35);
   targetZ = THREE.MathUtils.clamp(targetZ, 0.4, LEN - 0.4);
 

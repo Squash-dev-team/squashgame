@@ -50,6 +50,7 @@
   .sb-vs { font-size: 11px; opacity: .4; letter-spacing: .1em; font-weight: 700; }
   .sb-games { font-size: 10px; opacity: .9; font-weight: 700; color: var(--lime); background: rgba(200, 255, 61, 0.1); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(200, 255, 61, 0.2); margin-top: 4px; letter-spacing: .05em; }
   .sb-block { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  #scoreboard.practice-mode { display: none; }
 
   #pauseBtn {
     background: rgba(14, 15, 18, 0.85); border: 1px solid rgba(200, 255, 61, 0.3);
@@ -318,6 +319,37 @@
   .btn-equip { background: rgba(255,255,255,0.1); color: var(--white-90); border: 1px solid rgba(255,255,255,0.2); }
   .btn-equip:hover { background: rgba(255,255,255,0.2); }
   .btn-equipped { background: transparent; color: var(--lime); border: 1px solid var(--lime); cursor: default; }
+  .btn-buy { background: rgba(200,255,61,0.1); color: var(--lime); border: 1px solid rgba(200,255,61,0.35); }
+  .btn-buy:hover:not(:disabled) { background: rgba(200,255,61,0.2); }
+  .btn-buy:disabled { cursor: not-allowed; }
+
+  /* Roll spin — slot-machine cycling text while a roll resolves */
+  #rollResult.rolling { color: var(--lime); animation: rollPulse 0.15s ease-in-out infinite alternate; }
+  @keyframes rollPulse { from { opacity: 0.6; transform: scale(0.97); } to { opacity: 1; transform: scale(1.03); } }
+  #rollBtn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+  /* Roll reveal popup */
+  .reveal-badge { font-family: 'Rajdhani', sans-serif; font-size: 14px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; padding: 6px 16px; border-radius: 20px; margin-bottom: 14px; }
+  .reveal-badge.is-new { color: #000; background: var(--lime); box-shadow: 0 0 20px rgba(200,255,61,0.5); }
+  .reveal-badge.is-dupe { color: var(--white-90); background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); }
+  .reveal-preview-pop { animation: revealPop .5s cubic-bezier(.2,1.6,.4,1); }
+  @keyframes revealPop { 0% { transform: scale(0.3) rotate(-8deg); opacity: 0; } 60% { transform: scale(1.12) rotate(2deg); opacity: 1; } 100% { transform: scale(1) rotate(0deg); opacity: 1; } }
+
+  /* ===========================================================
+     CAREER STATS + ACHIEVEMENTS
+  =========================================================== */
+  #careerStatsGrid { width: 100%; display: flex; flex-direction: column; gap: 2px; margin-bottom: 20px; }
+  .career-stat-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: rgba(255,255,255,0.03); border-radius: 6px; }
+  .career-stat-label { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--white-90); opacity: 0.75; }
+  .career-stat-value { font-family: 'Rajdhani', sans-serif; font-size: 18px; font-weight: 700; color: var(--lime); }
+
+  #achievementsList { width: 100%; display: flex; flex-direction: column; gap: 10px; margin-bottom: 22px; }
+  .achievement-card { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.03); transition: all 0.2s; }
+  .achievement-card.unlocked { border-color: rgba(200,255,61,0.35); background: rgba(200,255,61,0.06); }
+  .achievement-card.locked { opacity: 0.55; }
+  .achievement-icon { font-size: 26px; width: 36px; text-align: center; flex-shrink: 0; }
+  .achievement-name { font-family: 'Rajdhani', sans-serif; font-size: 16px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em; }
+  .achievement-desc { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--white-90); opacity: 0.7; margin-top: 2px; }
 
   /* ===========================================================
      UI1 — INTRO / LANDING (highlight-reel cinematic)
@@ -359,8 +391,8 @@
   .intro-main-title.shine::after { animation: introTitleShine .9s cubic-bezier(.2,.7,.3,1) .15s; }
   @keyframes introTitleShine { 0% { transform: translateX(-120%); opacity: 0; } 15% { opacity: 1; } 100% { transform: translateX(120%); opacity: 0; } }
 
-  #introUI { position: fixed; left: 50%; bottom: 9%; transform: translateX(-50%); z-index: 10; display: flex; justify-content: center; flex-wrap: wrap; gap: 14px; pointer-events: none; background: rgba(0,0,0,0.55); backdrop-filter: blur(10px); border: 1px solid rgba(200,255,61,0.18); border-radius: 14px; padding: 22px 28px; box-shadow: 0 12px 40px rgba(0,0,0,0.6); }
-  #introUI.show { pointer-events: auto; }
+  #introUI { position: fixed; left: 50%; bottom: 9%; transform: translateX(-50%); z-index: 10; display: flex; justify-content: center; flex-wrap: wrap; gap: 14px; pointer-events: none; background: rgba(0,0,0,0.55); backdrop-filter: blur(10px); border: 1px solid rgba(200,255,61,0.18); border-radius: 14px; padding: 22px 28px; box-shadow: 0 12px 40px rgba(0,0,0,0.6); opacity: 0; transition: opacity .4s ease; }
+  #introUI.show { pointer-events: auto; opacity: 1; }
   .intro-menu-btn {
     position: relative; overflow: hidden;
     background: rgba(12,8,24,.88); border: 2px solid var(--lime); border-left: 5px solid var(--lime); color: #fff; border-radius: 8px;
@@ -485,17 +517,6 @@
   .mp-room-code { font-family: 'JetBrains Mono', monospace; font-size: 42px; font-weight: 700; letter-spacing: 0.15em; color: #fff; background: rgba(59,163,255,0.12); border: 1px solid rgba(59,163,255,0.4); border-radius: 10px; padding: 14px 28px; margin-bottom: 4px; }
   .mp-status-text { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--blue); opacity: 0.9; margin-top: 12px; min-height: 18px; text-align: center; max-width: 420px; }
   .mp-input { padding: 14px 18px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.5); color: #fff; font-family: 'JetBrains Mono', monospace; font-size: 20px; letter-spacing: 0.1em; text-align: center; text-transform: uppercase; width: min(280px, 80vw); margin-bottom: 14px; }
-
-  /* Functional controls (buttons/inputs) hold back a beat so the
-     panel's title + one-line definition reads first; see mp-reveal
-     toggled from multiplayer.js. */
-  .mp-controls { display: flex; flex-direction: column; align-items: center; opacity: 0; transform: translateY(14px); }
-  .mp-controls.mp-reveal { animation: mpControlsIn .45s cubic-bezier(.16,1,.3,1) forwards; }
-  @keyframes mpControlsIn { to { opacity: 1; transform: translateY(0); } }
-  @media (prefers-reduced-motion: reduce) {
-    .mp-controls { opacity: 1; transform: none; }
-    .mp-controls.mp-reveal { animation: none; }
-  }
 
   /* ===========================================================
      ACCOUNT AUTH (password visibility + signup requirements)
@@ -739,6 +760,9 @@
         <button class="home-menu-btn" data-target="home-preview-stats">
           <span class="home-menu-btn-text">Player Stats</span>
         </button>
+        <button class="home-menu-btn" data-target="home-preview-practice">
+          <span class="home-menu-btn-text">Practice</span>
+        </button>
       </div>
     </div>
 
@@ -792,7 +816,17 @@
           <path d="M20 180 L180 180" stroke="var(--white-90)" stroke-width="4" stroke-linecap="round" opacity="0.3"/>
         </svg>
         <h2 class="home-preview-title">Player Stats</h2>
-        <p class="home-preview-desc">Track your match history and skill metrics. (Career stats tracking is coming soon.)</p>
+        <p class="home-preview-desc">Track your lifetime match history, rally records, and unlockable achievements.</p>
+      </div>
+
+      <div class="home-preview-content" id="home-preview-practice">
+        <svg class="home-preview-graphic" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="30" y="30" width="140" height="100" rx="8" stroke="var(--lime)" stroke-width="6" fill="rgba(200,255,61,0.05)"/>
+          <circle cx="100" cy="150" r="14" fill="var(--lime)" opacity="0.85"/>
+          <path d="M100 130 L100 80" stroke="var(--lime)" stroke-width="4" stroke-dasharray="6 8" opacity="0.6"/>
+        </svg>
+        <h2 class="home-preview-title">Practice</h2>
+        <p class="home-preview-desc">No opponent, no scoreboard pressure — drill your serve or rally solo against the wall and chase a personal best.</p>
       </div>
     </div>
   </div>
@@ -837,6 +871,45 @@
     <div id="infoDesc" class="item-stat" style="margin-bottom:16px;min-height:auto;opacity:0.85;"></div>
     <div id="infoStats" style="width:100%;margin-bottom:22px;"></div>
     <button class="play-btn settings-btn" id="closeItemInfoBtn" style="width:100%;">Close</button>
+  </div>
+</div>
+
+<!-- ============ ROLL REVEAL POPUP (gacha result) ============ -->
+<div class="menu-overlay hidden" id="rollRevealOverlay" style="z-index: 82;">
+  <div class="menu-modal" style="width:min(380px,90vw);align-items:center;">
+    <div id="revealBadge" class="reveal-badge"></div>
+    <div id="revealRarity" class="rarity-label" style="align-self:center;"></div>
+    <div id="revealPreview" class="item-preview reveal-preview-pop" style="width:100px;height:100px;margin:14px 0;"></div>
+    <h2 id="revealName" class="modal-title" style="margin-bottom:6px;font-size:22px;"></h2>
+    <div id="revealNote" class="item-stat" style="margin-bottom:22px;opacity:0.85;"></div>
+    <button class="play-btn settings-btn" id="closeRollRevealBtn" style="width:100%;">Nice!</button>
+  </div>
+</div>
+
+<!-- ============ CAREER STATS + ACHIEVEMENTS (opened from UI2's side nav) ============ -->
+<div class="menu-overlay hidden" id="statsOverlay" style="z-index: 55;">
+  <div class="menu-modal" style="width:min(520px,92vw);">
+    <h2 class="modal-title">Career Stats</h2>
+    <div id="careerStatsGrid"></div>
+    <div class="section-label">Achievements</div>
+    <div id="achievementsList"></div>
+    <button class="play-btn settings-btn" id="closeStatsBtn" style="width:100%;">Back</button>
+  </div>
+</div>
+
+<!-- ============ PRACTICE MODE PICKER (opened from UI2's side nav) ============ -->
+<div class="menu-overlay hidden" id="practiceOverlay" style="z-index: 55;">
+  <div class="menu-modal" style="width:min(440px,92vw);">
+    <h2 class="modal-title">Practice</h2>
+    <div style="width:100%;display:flex;flex-direction:column;gap:12px;margin-bottom:16px;">
+      <button class="menu-btn-opt" id="practiceServeBtn" style="margin:0;border-radius:8px;text-align:left;padding:16px 18px;">
+        🎯 Serve Practice<br><span style="font-size:11px;opacity:0.7;font-weight:400;text-transform:none;display:inline-block;margin-top:4px;">Repeat serves and chase a legal-serve streak.</span>
+      </button>
+      <button class="menu-btn-opt" id="practiceWallRallyBtn" style="margin:0;border-radius:8px;text-align:left;padding:16px 18px;">
+        🧱 Wall Rally<br><span style="font-size:11px;opacity:0.7;font-weight:400;text-transform:none;display:inline-block;margin-top:4px;">No opponent — keep the rally alive against the wall.</span>
+      </button>
+    </div>
+    <button class="play-btn settings-btn" id="closePracticeBtn" style="width:100%;">Back</button>
   </div>
 </div>
 
@@ -938,16 +1011,6 @@
         </svg>
         <h2 class="mp-preview-title">Create Room</h2>
         <p class="mp-preview-desc">Generate a private room code and invite a friend to play a 1-on-1 match.</p>
-        <div class="mp-controls">
-          <div id="mpCreateIdle">
-            <button class="play-btn" id="mpCreateGenerateBtn" style="width:auto;padding:14px 32px;">Generate Room Code</button>
-          </div>
-          <div id="mpCreateActive" class="hidden" style="display:flex;flex-direction:column;align-items:center;">
-            <div class="mp-room-code" id="mpRoomCode">------</div>
-            <div class="mp-status-text" id="mpCreateStatus">Connecting...</div>
-            <button class="play-btn settings-btn" id="mpCreateCancelBtn" style="width:auto;padding:12px 28px;margin-top:14px;">Cancel</button>
-          </div>
-        </div>
       </div>
 
       <div class="mp-preview-content" id="mp-preview-enter">
@@ -965,11 +1028,6 @@
         </svg>
         <h2 class="mp-preview-title">Enter Room</h2>
         <p class="mp-preview-desc">Have a room code from a friend? Type it in below to join their match.</p>
-        <div class="mp-controls">
-          <input type="text" id="mpJoinInput" class="mp-input" placeholder="ROOM CODE" maxlength="6">
-          <button class="play-btn" id="mpJoinBtn" style="width:auto;padding:14px 32px;">Join Room</button>
-          <div class="mp-status-text" id="mpJoinStatus"></div>
-        </div>
       </div>
 
       <div class="mp-preview-content" id="mp-preview-free">
@@ -987,13 +1045,46 @@
         </svg>
         <h2 class="mp-preview-title">Free Play</h2>
         <p class="mp-preview-desc">Get matched with the next available opponent for an instant 1-on-1 match.</p>
-        <div class="mp-controls">
-          <button class="play-btn" id="mpFindMatchBtn" style="width:auto;padding:14px 32px;">Find Match</button>
-          <div class="mp-status-text" id="mpFindStatus"></div>
-          <button class="play-btn settings-btn hidden" id="mpFindCancelBtn" style="width:auto;padding:12px 28px;margin-top:10px;">Cancel Search</button>
-        </div>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- CREATE ROOM (opened from UI3's side nav) -->
+<div class="menu-overlay hidden" id="mpCreateView" style="z-index: 55;">
+  <div class="menu-modal">
+    <h2 class="modal-title">Create Room</h2>
+    <div id="mpCreateIdle">
+      <button class="play-btn" id="mpCreateGenerateBtn" style="width:auto;padding:14px 32px;">Generate Room Code</button>
+    </div>
+    <div id="mpCreateActive" class="hidden" style="display:flex;flex-direction:column;align-items:center;">
+      <div class="mp-room-code" id="mpRoomCode">------</div>
+      <div class="mp-status-text" id="mpCreateStatus">Connecting...</div>
+      <button class="play-btn settings-btn" id="mpCreateCancelBtn" style="width:auto;padding:12px 28px;margin-top:14px;">Cancel</button>
+    </div>
+    <button class="play-btn settings-btn" id="closeMpCreateBtn" style="margin-top: 20px;">← Back</button>
+  </div>
+</div>
+
+<!-- ENTER ROOM (opened from UI3's side nav) -->
+<div class="menu-overlay hidden" id="mpEnterView" style="z-index: 55;">
+  <div class="menu-modal">
+    <h2 class="modal-title">Enter Room</h2>
+    <input type="text" id="mpJoinInput" class="mp-input" placeholder="ROOM CODE" maxlength="6">
+    <button class="play-btn" id="mpJoinBtn" style="width:auto;padding:14px 32px;">Join Room</button>
+    <div class="mp-status-text" id="mpJoinStatus"></div>
+    <button class="play-btn settings-btn" id="closeMpEnterBtn" style="margin-top: 20px;">← Back</button>
+  </div>
+</div>
+
+<!-- FREE PLAY (opened from UI3's side nav) -->
+<div class="menu-overlay hidden" id="mpFreeView" style="z-index: 55;">
+  <div class="menu-modal">
+    <h2 class="modal-title">Free Play</h2>
+    <button class="play-btn" id="mpFindMatchBtn" style="width:auto;padding:14px 32px;">Find Match</button>
+    <div class="mp-status-text" id="mpFindStatus"></div>
+    <button class="play-btn settings-btn hidden" id="mpFindCancelBtn" style="width:auto;padding:12px 28px;margin-top:10px;">Cancel Search</button>
+    <button class="play-btn settings-btn" id="closeMpFreeBtn" style="margin-top: 20px;">← Back</button>
   </div>
 </div>
 

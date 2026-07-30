@@ -17,7 +17,7 @@ let active = false;
 let initialized = false;
 
 export function initHome(callbacks = {}) {
-  const { onEnterCourt, onSettings, onControls, onStats, onBack } = callbacks;
+  const { onEnterCourt, onSettings, onControls, onStats, onPractice, onBack } = callbacks;
 
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0e0f12);
@@ -183,6 +183,13 @@ export function initHome(callbacks = {}) {
       p1Targets: [{ t: 0, pos: [0.5, 2.5] }, { t: 4, pos: [0, 3] }],
       p2Targets: [{ t: 0, pos: [-0.5, 6] }, { t: 4, pos: [0, 5.5] }],
       shots: [{ start: 0.0, pos: new THREE.Vector3(3.2, 1.5, 6), look: new THREE.Vector3(0, 1.5, 4), fov: 60, pan: new THREE.Vector3(0, -0.001, -0.002) }]
+    },
+    'home-preview-practice': {
+      duration: 5.0, initialBall: [0.3, 1.2, 2.5],
+      hits: [{ t: 0.3, v: [-0.2, 2, -14], by: 1 }, { t: 2.0, v: [0.2, 2, -14], by: 1 }, { t: 3.7, v: [-0.2, 2, -14], by: 1 }],
+      p1Targets: [{ t: 0, pos: [0.3, 3] }, { t: 5, pos: [0.3, 3] }],
+      p2Targets: [{ t: 0, pos: [-3, 9] }, { t: 5, pos: [-3, 9] }],
+      shots: [{ start: 0.0, pos: new THREE.Vector3(2.6, 1.4, 5.5), look: new THREE.Vector3(0, 1.2, 1), fov: 55, pan: new THREE.Vector3(-0.001, 0, -0.002) }]
     }
   };
 
@@ -221,6 +228,7 @@ export function initHome(callbacks = {}) {
       else if (target === 'home-preview-settings') onSettings?.();
       else if (target === 'home-preview-controls') onControls?.();
       else if (target === 'home-preview-stats') onStats?.();
+      else if (target === 'home-preview-practice') onPractice?.();
     });
   });
 

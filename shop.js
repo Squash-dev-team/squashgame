@@ -57,9 +57,13 @@ export const CLASSES = [
 
 const LOCAL_SAVE_KEY = 'squashStrikeProfileV2';
 const SAVE_CODE_PREFIX = 'SSPRO2-';
-const ROLL_COSTS = { char: 120, racquet: 80, class: 80 };
+const ROLL_COSTS = { char: 120, racquet: 250, class: 520 };
+// Buying a specific item outright (instead of rolling for it) skips the
+// chance of pulling a duplicate, so it costs a multiple of the roll price.
+const DIRECT_BUY_MULT = 5;
 const TAB_LABELS = { char: 'Character', racquet: 'Racquet', class: 'Class' };
 let activeTab = 'char';
+let isRolling = false;
 
 function defaultProfile() {
   return {
@@ -69,7 +73,8 @@ function defaultProfile() {
     unlockedRacquets: ['r_wood'],
     unlockedClasses: ['class_balanced'],
     equipped: { character: 'c_default', racquet: 'r_wood', class: 'class_balanced' },
-    stats: { matchesPlayed: 0, matchesWon: 0, matchesLost: 0, totalRallies: 0, totalWinners: 0, totalErrors: 0, maxSpeedAllTime: 0 }
+    stats: { matchesPlayed: 0, matchesWon: 0, matchesLost: 0, totalRallies: 0, totalWinners: 0, totalErrors: 0, maxSpeedAllTime: 0, longestRallyAllTime: 0 },
+    achievements: {}
   };
 }
 
@@ -84,7 +89,14 @@ export function loadProfile() {
       if (!parsed.unlockedRacquets) parsed.unlockedRacquets = ['r_wood'];
       if (!parsed.unlockedClasses) parsed.unlockedClasses = ['class_balanced'];
       if (!parsed.equipped) parsed.equipped = { character: 'c_default', racquet: 'r_wood', class: 'class_balanced' };
-      playerProfile = Object.assign(defaultProfile(), parsed);
+      // Sub-merge stats/achievements field-by-field rather than trusting
+      // Object.assign(defaultProfile(), parsed) alone — that would shallow-
+      // copy an older save's whole `stats` object as-is, silently dropping
+      // any new field (e.g. longestRallyAllTime) added since that save.
+      const defaults = defaultProfile();
+      parsed.stats = Object.assign({}, defaults.stats, parsed.stats || {});
+      parsed.achievements = Object.assign({}, defaults.achievements, parsed.achievements || {});
+      playerProfile = Object.assign(defaults, parsed);
     }
   } catch (e) { playerProfile = defaultProfile(); }
   return playerProfile;
@@ -144,6 +156,7 @@ function makeStatBar(label, mult, colorCls) {
 }
 
 function switchTab(tab) {
+  if (isRolling) return;
   activeTab = tab;
   dom.tabChar.classList.toggle('active', tab === 'char');
   dom.tabRacquet.classList.toggle('active', tab === 'racquet');
@@ -173,6 +186,15 @@ function charStatsBar(char) {
   return `<div class="item-stats-box">${makeStatBar('POW', char.powerMult, 'stat-pow')}${makeStatBar('SPD', char.speedMult, 'stat-spd')}${makeStatBar('ACC', char.aimMult, 'stat-acc')}${makeStatBar('STM', char.stamMult, 'stat-stm')}</div>`;
 }
 
+function itemPreviewHtml(item, type) {
+  if (type === 'char') {
+    return `<div class="char-preview-core" style="background-color:${item.skin.replace('0x', '#')};box-shadow:0 0 15px ${item.glow.replace('0x', '#')} inset;border-color:${item.glow.replace('0x', '#')};"></div>`;
+  } else if (type === 'racquet') {
+    return `<div class="racquet-preview-core" style="border-color:${item.color.replace('0x', '#')};"></div>`;
+  }
+  return `<div style="font-size:48px;">${item.icon}</div>`;
+}
+
 function openItemInfo(item, type) {
   if (!dom.infoOverlay) return;
   const rarityClass = item.rarity.replace(' ', '-');
@@ -181,14 +203,12 @@ function openItemInfo(item, type) {
   dom.infoName.textContent = item.name;
   dom.infoDesc.textContent = item.desc || '';
 
+  dom.infoPreview.innerHTML = itemPreviewHtml(item, type);
   if (type === 'char') {
-    dom.infoPreview.innerHTML = `<div class="char-preview-core" style="background-color:${item.skin.replace('0x', '#')};box-shadow:0 0 15px ${item.glow.replace('0x', '#')} inset;border-color:${item.glow.replace('0x', '#')};"></div>`;
     dom.infoStats.innerHTML = charStatsBar(item);
   } else if (type === 'racquet') {
-    dom.infoPreview.innerHTML = `<div class="racquet-preview-core" style="border-color:${item.color.replace('0x', '#')};"></div>`;
     dom.infoStats.innerHTML = `<div class="item-stats-box">${makeStatBar('POW', item.powerMult, 'stat-pow')}${makeStatBar('SPD', item.speedMult, 'stat-spd')}${makeStatBar('ACC', item.aimMult, 'stat-acc')}</div>`;
   } else {
-    dom.infoPreview.innerHTML = `<div style="font-size:48px;">${item.icon}</div>`;
     dom.infoStats.innerHTML = `<div class="item-stats-box">${makeStatBar('SPD', item.speedMult, 'stat-spd')}${makeStatBar('POW', item.powerMult, 'stat-pow')}${makeStatBar('STM', item.stamMult, 'stat-stm')}${makeStatBar('RCH', item.reachMult, 'stat-rch')}</div>`;
   }
   revealScreen(dom.infoOverlay);
@@ -204,12 +224,39 @@ function makeShopCard(item, type, isUnlocked, isEquipped, innerHtml) {
   });
 
   const btn = document.createElement('button');
-  btn.className = 'shop-btn ' + (isEquipped ? 'btn-equipped' : isUnlocked ? 'btn-equip' : '');
-  btn.textContent = isEquipped ? 'Equipped' : isUnlocked ? 'Equip' : '🔒 Locked';
-  if (!isUnlocked) { btn.disabled = true; btn.style.opacity = '0.5'; btn.style.cursor = 'not-allowed'; }
-  else if (!isEquipped) btn.addEventListener('click', () => equipItem(type, item.id));
+  if (isEquipped) {
+    btn.className = 'shop-btn btn-equipped';
+    btn.textContent = 'Equipped';
+  } else if (isUnlocked) {
+    btn.className = 'shop-btn btn-equip';
+    btn.textContent = 'Equip';
+    btn.addEventListener('click', () => equipItem(type, item.id));
+  } else {
+    // Not unlocked yet: buy this exact item outright, skipping the roll's
+    // chance of a duplicate, at DIRECT_BUY_MULT times the roll price.
+    const directCost = ROLL_COSTS[type] * DIRECT_BUY_MULT;
+    const affordable = playerProfile.coins >= directCost;
+    btn.className = 'shop-btn btn-buy';
+    btn.textContent = `Buy — ${directCost} 🪙`;
+    if (!affordable) { btn.disabled = true; btn.style.opacity = '0.5'; }
+    else btn.addEventListener('click', () => buyItemDirect(type, item));
+  }
   card.appendChild(btn);
   return card;
+}
+
+function buyItemDirect(type, item) {
+  if (isRolling) return;
+  const directCost = ROLL_COSTS[type] * DIRECT_BUY_MULT;
+  if (playerProfile.coins < directCost) return;
+  const unlockedList = type === 'char' ? playerProfile.unlockedCharacters : type === 'racquet' ? playerProfile.unlockedRacquets : playerProfile.unlockedClasses;
+  if (unlockedList.includes(item.id)) return;
+
+  playerProfile.coins -= directCost;
+  unlockedList.push(item.id);
+  saveProfile();
+  renderShop();
+  showRollReveal(item, type, true, 0, true);
 }
 
 function renderShop() {
@@ -261,26 +308,80 @@ function renderShop() {
 }
 
 function rollItem() {
-  const cost = ROLL_COSTS[activeTab];
+  if (isRolling) return;
+  const type = activeTab;
+  const cost = ROLL_COSTS[type];
   if (playerProfile.coins < cost) return;
-  playerProfile.coins -= cost;
 
-  const pool = activeTab === 'char' ? CHARACTERS : activeTab === 'racquet' ? RACQUETS : CLASSES;
+  playerProfile.coins -= cost;
+  dom.topCoins.textContent = playerProfile.coins;
+
+  const pool = type === 'char' ? CHARACTERS : type === 'racquet' ? RACQUETS : CLASSES;
   const pick = pool[Math.floor(Math.random() * pool.length)];
-  const unlockedList = activeTab === 'char' ? playerProfile.unlockedCharacters : activeTab === 'racquet' ? playerProfile.unlockedRacquets : playerProfile.unlockedClasses;
-  const rarityClass = pick.rarity.replace(' ', '-');
+  const unlockedList = type === 'char' ? playerProfile.unlockedCharacters : type === 'racquet' ? playerProfile.unlockedRacquets : playerProfile.unlockedClasses;
+  const isNew = !unlockedList.includes(pick.id);
   const dupeRefund = Math.round(cost / 3);
 
-  if (unlockedList.includes(pick.id)) {
-    playerProfile.coins += dupeRefund;
-    dom.rollResult.innerHTML = `Duplicate <span class="rarity-label rarity-${rarityClass}" style="display:inline-block;">${pick.rarity}</span> ${pick.name} — converted to +${dupeRefund} 🪙`;
+  isRolling = true;
+  dom.rollBtn.disabled = true;
+  dom.rollResult.classList.add('rolling');
+
+  let ticks = 0;
+  const totalTicks = 16;
+  const spinTimer = setInterval(() => {
+    const flash = pool[Math.floor(Math.random() * pool.length)];
+    const label = type === 'class' ? `${flash.icon} ${flash.name}` : flash.name;
+    dom.rollResult.textContent = label;
+    ticks++;
+    if (ticks >= totalTicks) {
+      clearInterval(spinTimer);
+      dom.rollResult.classList.remove('rolling');
+      dom.rollResult.textContent = '';
+      isRolling = false;
+
+      if (isNew) unlockedList.push(pick.id);
+      else playerProfile.coins += dupeRefund;
+
+      saveProfile();
+      renderShop();
+      showRollReveal(pick, type, isNew, dupeRefund);
+    }
+  }, 70);
+}
+
+/**
+ * Big pop-in confirmation of what a roll (or direct buy) actually landed on —
+ * without this, unlocking e.g. a racquet only showed a one-line text swap
+ * under the roll button, easy to miss entirely.
+ */
+function showRollReveal(item, type, isNew, dupeRefund, isDirectBuy = false) {
+  if (!dom.revealOverlay) return;
+  const rarityClass = item.rarity.replace(' ', '-');
+  dom.revealRarity.className = `rarity-label rarity-${rarityClass}`;
+  dom.revealRarity.textContent = item.rarity;
+  dom.revealPreview.innerHTML = itemPreviewHtml(item, type);
+  dom.revealName.textContent = item.name;
+
+  if (isDirectBuy) {
+    dom.revealBadge.className = 'reveal-badge is-new';
+    dom.revealBadge.textContent = 'PURCHASED!';
+    dom.revealNote.textContent = `${TAB_LABELS[type]} unlocked and ready to equip.`;
+  } else if (isNew) {
+    dom.revealBadge.className = 'reveal-badge is-new';
+    dom.revealBadge.textContent = 'NEW UNLOCK!';
+    dom.revealNote.textContent = `${TAB_LABELS[type]} added to your collection — equip it from the shop grid.`;
   } else {
-    unlockedList.push(pick.id);
-    dom.rollResult.innerHTML = `🎉 New ${TAB_LABELS[activeTab]}! <span class="rarity-label rarity-${rarityClass}" style="display:inline-block;">${pick.rarity}</span> ${pick.name}`;
+    dom.revealBadge.className = 'reveal-badge is-dupe';
+    dom.revealBadge.textContent = 'DUPLICATE';
+    dom.revealNote.textContent = `Already owned — converted to +${dupeRefund} 🪙 instead.`;
   }
 
-  saveProfile();
-  renderShop();
+  // Re-trigger the pop animation even if the same element popped before.
+  dom.revealPreview.classList.remove('reveal-preview-pop');
+  void dom.revealPreview.offsetWidth;
+  dom.revealPreview.classList.add('reveal-preview-pop');
+
+  revealScreen(dom.revealOverlay);
 }
 
 export function initShop() {
@@ -306,7 +407,14 @@ export function initShop() {
     infoName: document.getElementById('infoName'),
     infoDesc: document.getElementById('infoDesc'),
     infoStats: document.getElementById('infoStats'),
-    closeInfoBtn: document.getElementById('closeItemInfoBtn')
+    closeInfoBtn: document.getElementById('closeItemInfoBtn'),
+    revealOverlay: document.getElementById('rollRevealOverlay'),
+    revealBadge: document.getElementById('revealBadge'),
+    revealRarity: document.getElementById('revealRarity'),
+    revealPreview: document.getElementById('revealPreview'),
+    revealName: document.getElementById('revealName'),
+    revealNote: document.getElementById('revealNote'),
+    closeRevealBtn: document.getElementById('closeRollRevealBtn')
   };
 
   dom.tabChar.addEventListener('click', () => switchTab('char'));
@@ -315,6 +423,7 @@ export function initShop() {
   dom.rollBtn.addEventListener('click', rollItem);
   dom.closeBtn.addEventListener('click', closeShop);
   dom.closeInfoBtn?.addEventListener('click', () => concealScreen(dom.infoOverlay));
+  dom.closeRevealBtn?.addEventListener('click', () => concealScreen(dom.revealOverlay));
 }
 
 export function openShop() {
